@@ -1,0 +1,49 @@
+{
+  "zones": [
+    {
+      "zoneId": "z001",
+      "name": "Connaught Place",
+      "crimeLevel": 15,
+      "crowdLevel": "busy",
+      "infraLevel": "full",
+      "lat": 28.6315,
+      "lng": 77.2167
+    },
+    {
+      "zoneId": "z002",
+      "name": "Rajiv Chowk Metro",
+      "crimeLevel": 20,
+      "crowdLevel": "busy",
+      "infraLevel": "full",
+      "lat": 28.6328,
+      "lng": 77.2197
+    },
+    {
+      "zoneId": "z003",
+      "name": "Isolated Back Lane",
+      "crimeLevel": 70,
+      "crowdLevel": "isolated",
+      "infraLevel": "poor",
+      "lat": 28.6100,
+      "lng": 77.2280
+    },
+    {
+      "zoneId": "z004",
+      "name": "Lajpat Nagar Market",
+      "crimeLevel": 18,
+      "crowdLevel": "busy",
+      "infraLevel": "full",
+      "lat": 28.5677,
+      "lng": 77.2437
+    },
+    {
+      "zoneId": "z005",
+      "name": "Dimly Lit Underpass",
+      "crimeLevel": 60,
+      "crowdLevel": "isolated",
+      "infraLevel": "poor",
+      "lat": 28.5900,
+      "lng": 77.2350
+    }
+  ]
+}

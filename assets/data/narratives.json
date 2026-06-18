@@ -1,0 +1,10 @@
+{
+  "routeA": {
+    "day": "This route passes through moderate-traffic lanes during daytime. Adequate footfall reduces risk significantly during daylight hours.",
+    "night": "This route passes through 2 isolated stretches with limited lighting after 8 PM. 3 incidents reported in this corridor in recent months."
+  },
+  "routeB": {
+    "day": "Market-facing route with full street lighting and active commercial areas. Consistently high foot traffic throughout the day.",
+    "night": "Well-lit commercial corridor with active foot traffic until 10 PM. Recommended for evening travel. Safety infrastructure rated excellent."
+  }
+}

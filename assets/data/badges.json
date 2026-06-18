@@ -1,0 +1,28 @@
+{
+  "routeA": {
+    "day": [
+      { "icon": "🕐", "label": "Daytime safe", "type": "safe" },
+      { "icon": "🚶", "label": "Moderate crowd", "type": "safe" },
+      { "icon": "⚠️", "label": "Limited CCTV", "type": "risk" }
+    ],
+    "night": [
+      { "icon": "🌑", "label": "Poor lighting", "type": "risk" },
+      { "icon": "🚨", "label": "Incident reports", "type": "risk" },
+      { "icon": "👥", "label": "Isolated stretch", "type": "risk" }
+    ]
+  },
+  "routeB": {
+    "day": [
+      { "icon": "💡", "label": "Well-lit area", "type": "safe" },
+      { "icon": "🚶", "label": "Busy footpath", "type": "safe" },
+      { "icon": "📍", "label": "Low crime zone", "type": "safe" },
+      { "icon": "🕐", "label": "Time-safe", "type": "safe" }
+    ],
+    "night": [
+      { "icon": "💡", "label": "Well-lit area", "type": "safe" },
+      { "icon": "🚶", "label": "Busy footpath", "type": "safe" },
+      { "icon": "📍", "label": "Low crime zone", "type": "safe" },
+      { "icon": "🕐", "label": "Time-safe", "type": "safe" }
+    ]
+  }
+}
