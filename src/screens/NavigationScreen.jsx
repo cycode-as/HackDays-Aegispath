@@ -25,12 +25,14 @@ import MapView, { Polyline, Marker } from 'react-native-maps';
 import * as Haptics from 'expo-haptics';
 import SOSButton from '../components/SOSButton';
 import ShakeSOSAlert from '../components/ShakeSOSAlert';
+import SafetyAlertCard from '../components/SafetyAlertCard';
 import { useShakeToSOS } from '../hooks/useShakeToSOS';
 import { colors, getRiskColor } from '../config/colors';
 import { useRouteStore } from '../stores/useRouteStore';
 import { call112 } from '../services/sendSOS';
 import { getAlternativeRoute } from '../services/routingEngine';
 import { getNearestPoliceStation } from '../services/policeStationService';
+import { generateSafetyAlert, shouldTriggerAlert } from '../services/geminiSafetyAlerts';
 import * as Location from 'expo-location';
 
 function getPolylineColor(riskLevel) {
@@ -93,6 +95,13 @@ export default function NavigationScreen({ navigation }) {
   const [policeStation,  setPoliceStation]  = useState(null);
   const [policeLoading,  setPoliceLoading]  = useState(false);
   const [aheadInfo,      setAheadInfo]      = useState(null); // one-line ahead strip
+
+  // ── Gemini Dynamic Safety Alert state ──────────────────────────────────────
+  const [geminiAlert,        setGeminiAlert]        = useState(null);   // { severity, title, message }
+  const [geminiLoading,      setGeminiLoading]      = useState(false);  // skeleton while generating
+  const [geminiCardVisible,  setGeminiCardVisible]  = useState(false);  // controls card visibility
+  const lastAlertFingerprint = useRef(null);  // deduplication — don't re-show identical alerts
+  const geminiInFlight       = useRef(false); // prevent concurrent calls
 
   // ── Refs ────────────────────────────────────────────────────────────────────
   const mapRef            = useRef(null);
@@ -343,6 +352,96 @@ export default function NavigationScreen({ navigation }) {
 
     setAheadInfo(info);
   }, [dotIndex, selectedRoute]);
+
+  // ── Gemini Dynamic Safety Alert ─────────────────────────────────────────────
+  // Runs once after navigation phase begins, then re-evaluates whenever the
+  // dot crosses the 25%, 60% and 85% progress thresholds.
+  // The service itself enforces the 60s cooldown and deduplication by fingerprint.
+  // Nothing here modifies route scores, rankings, or any navigation state.
+  useEffect(() => {
+    // Only run during active navigation
+    if (selectionPhase !== 'navigating') return;
+    if (!selectedRoute) return;
+    if (geminiInFlight.current) return;
+
+    const coords = activeCoordsRef.current;
+    if (!coords || coords.length === 0) return;
+
+    // Only trigger at meaningful progress milestones to avoid over-calling
+    const progress = dotIndex / Math.max(1, coords.length - 1);
+    const milestone =
+      dotIndex === 0 ? 'start' :
+      (progress >= 0.25 && progress < 0.27) ? 'quarter' :
+      (progress >= 0.60 && progress < 0.62) ? 'mid' :
+      (progress >= 0.85 && progress < 0.87) ? 'near-end' :
+      null;
+
+    if (!milestone && dotIndex !== 0) return; // not a trigger milestone
+
+    // Build route context from existing scoring data — no new API calls
+    const { confidenceFactors = {}, safetyScore = 50 } = selectedRoute;
+    const routeContext = {
+      timeMode,
+      travelMode,
+      safetyScore,
+      crowdConfidence:    confidenceFactors.crowd     ?? 50,
+      lightingConfidence: confidenceFactors.lighting  ?? 50,
+      emergencyAccess:    confidenceFactors.emergency ?? 50,
+      isolationRisk:      confidenceFactors.isolation ?? 20,
+      safePOIs:           confidenceFactors.safePOI   ?? 0,
+      neutralPOIs:        confidenceFactors.neutralPOI ?? 0,
+      cautionPOIs:        confidenceFactors.cautionPOI ?? 0,
+      nearbyPoliceStations: policeStation ? 1 : 0,
+      nearbyHospitals:    0,
+    };
+
+    // Check trigger conditions before even attempting the API call
+    if (!shouldTriggerAlert(routeContext)) return;
+
+    // Build fingerprint to avoid re-showing identical alerts
+    const fp = [
+      routeContext.timeMode,
+      routeContext.travelMode,
+      Math.round(routeContext.safetyScore / 10),
+      Math.round(routeContext.crowdConfidence / 10),
+      Math.round(routeContext.lightingConfidence / 10),
+      Math.round(routeContext.isolationRisk / 10),
+      milestone,
+    ].join('|');
+
+    if (fp === lastAlertFingerprint.current) return; // same conditions, already shown
+
+    // Fire async — non-blocking, navigation continues
+    geminiInFlight.current = true;
+    setGeminiLoading(true);
+    setGeminiCardVisible(true);
+
+    generateSafetyAlert(routeContext)
+      .then(alert => {
+        if (!isMounted.current) return;
+        if (alert) {
+          setGeminiAlert(alert);
+          lastAlertFingerprint.current = fp;
+        } else {
+          // No alert returned (cooldown, cache, error) — hide the loading card
+          setGeminiCardVisible(false);
+        }
+      })
+      .catch(() => {
+        // Silent fail — never crash navigation
+        if (isMounted.current) setGeminiCardVisible(false);
+      })
+      .finally(() => {
+        geminiInFlight.current = false;
+        if (isMounted.current) setGeminiLoading(false);
+      });
+
+  }, [dotIndex, selectionPhase, selectedRoute, timeMode, travelMode, policeStation]);
+
+  // ── Dismiss Gemini alert ────────────────────────────────────────────────────
+  const handleDismissGeminiAlert = useCallback(() => {
+    setGeminiCardVisible(false);
+  }, []);
 
   // ── Recenter ────────────────────────────────────────────────────────────────
   const handleRecenter = useCallback(() => {
@@ -873,6 +972,18 @@ export default function NavigationScreen({ navigation }) {
         </View>
       )}
 
+      {/* ── Gemini Dynamic Safety Alert ── */}
+      {(geminiCardVisible || geminiLoading) && (
+        <View style={styles.geminiAlertWrap} pointerEvents="box-none">
+          <SafetyAlertCard
+            visible={geminiCardVisible}
+            loading={geminiLoading}
+            alert={geminiAlert}
+            onDismiss={handleDismissGeminiAlert}
+          />
+        </View>
+      )}
+
       {/* Police modal */}
       <Modal visible={policeVisible} transparent animationType="slide" onRequestClose={() => setPoliceVisible(false)}>
         <View style={styles.alertBackdrop}>
@@ -1153,6 +1264,15 @@ const styles = StyleSheet.create({
   floatAlertText:    { fontSize: 13, fontWeight: '700', lineHeight: 18 },
   floatAlertTextSafe:    { color: '#15803D' },
   floatAlertTextCaution: { color: '#92400E' },
+
+  // ── Gemini Dynamic Safety Alert wrapper ─────────────────────────────────────
+  geminiAlertWrap: {
+    position: 'absolute',
+    bottom: 230,
+    left: 16,
+    right: 100,
+    zIndex: 20,
+  },
 
   alertBackdrop: {
     flex: 1,
