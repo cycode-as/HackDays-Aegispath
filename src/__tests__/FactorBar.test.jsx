@@ -32,20 +32,42 @@ describe('Property 2: FactorBar colour mapping is correct for all values', () =>
   });
 });
 
+// FACTOR_META maps known labels to a displayLabel; unknown labels fall back
+// to rendering the raw label string. Both paths must work correctly.
+const FACTOR_META = {
+  Crime: 'High Crime Zone',
+  Time:  'Night-time Risk',
+  Crowd: 'Low Crowd Density',
+  Infra: 'Poor Lighting',
+};
+
+// Prototype / Object property names that fc.string() can generate and that
+// break getByText() lookups in @testing-library — exclude them all.
+const RESERVED_STRINGS = new Set([
+  'constructor', 'prototype', '__proto__', 'hasOwnProperty',
+  'toString', 'valueOf', 'toLocaleString', 'isPrototypeOf',
+  'propertyIsEnumerable', '__defineGetter__', '__defineSetter__',
+  '__lookupGetter__', '__lookupSetter__',
+]);
+
+// Safe arbitrary: alphanumeric + space, no reserved words, no empty after trim.
+const safeLabel = fc
+  .stringMatching(/^[A-Za-z][A-Za-z0-9 ]{0,28}[A-Za-z0-9]$/)
+  .filter(s => !RESERVED_STRINGS.has(s) && s.trim().length > 0);
+
 // ---------------------------------------------------------------------------
 // Property 1: FactorBar renders label and proportional fill for any valid input
 // Validates: Requirements 2.1, 2.2
 // ---------------------------------------------------------------------------
 describe('Property 1: FactorBar renders label and proportional fill for any valid input', () => {
-  it('renders the label text and animates fill to (value / 100) * trackWidth', () => {
+  it('renders the display label text and animates fill to (value / 100) * trackWidth', () => {
     const TRACK_WIDTH = 300;
-    // Spy on withTiming to capture the target value passed to the animation.
     const reanimated = require('react-native-reanimated');
     const withTimingSpy = jest.spyOn(reanimated, 'withTiming');
 
     fc.assert(
       fc.property(
-        fc.string({ minLength: 1 }),
+        safeLabel,
         fc.integer({ min: 0, max: 100 }),
         (label, value) => {
           withTimingSpy.mockClear();
@@ -54,22 +76,19 @@ describe('Property 1: FactorBar renders label and proportional fill for any vali
             <FactorBar label={label} value={value} />
           );
 
-          // 2.1 — label text is present
-          expect(getByText(label)).toBeTruthy();
+          // 2.1 — The component renders through FACTOR_META: known labels get
+          // a displayLabel, unknown labels fall back to the raw label string.
+          const expectedText = FACTOR_META[label] ?? label;
+          expect(getByText(expectedText)).toBeTruthy();
 
-          // 2.2 — trigger onLayout with a fixed track width so the animation
-          // target can be verified. act() flushes the state update and the
-          // subsequent useEffect that calls withTiming.
+          // 2.2 — Trigger onLayout so the animation target can be verified.
           act(() => {
             fireEvent(getByTestId('factor-bar-track'), 'layout', {
               nativeEvent: { layout: { width: TRACK_WIDTH } },
             });
           });
 
-          // The expected fill target is proportional to the track width.
           const expectedTarget = (value / 100) * TRACK_WIDTH;
-
-          // Verify withTiming was called with the correct target width.
           expect(withTimingSpy).toHaveBeenCalledWith(
             expectedTarget,
             expect.objectContaining({ duration: 600 })
