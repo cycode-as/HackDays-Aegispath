@@ -166,10 +166,32 @@ export function shouldTriggerAlert(ctx) {
 export async function generateSafetyAlert(routeContext) {
   try {
     // ── API key guard ────────────────────────────────────────────────────────
+    // Expo exposes EXPO_PUBLIC_* vars via process.env at Metro bundle time.
+    // In Expo Go / development, the .env file at the project root is read
+    // automatically by Expo CLI (expo-env support added in SDK 49+).
     const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-    if (!apiKey || apiKey === 'your_gemini_api_key_here') {
-      // Key not configured — fail silently, navigation continues
+    if (!apiKey || apiKey === 'your_gemini_api_key_here' || apiKey.trim() === '') {
+      // Key not configured — fail silently, navigation continues unaffected
       return null;
+    }
+
+    // ── Dev mode: return deterministic mock so UI is testable without a key ──
+    // Remove this block (or set EXPO_PUBLIC_GEMINI_API_KEY to a real key) in prod.
+    if (__DEV__ && apiKey === 'dev_mock') {
+      const { isolationRisk = 20, lightingConfidence = 80, crowdConfidence = 60 } = routeContext;
+      const severity =
+        isolationRisk > 70 || lightingConfidence < 30 ? 'high' :
+        lightingConfidence < 40 || crowdConfidence < 35 ? 'medium' : 'low';
+      return {
+        severity,
+        title: severity === 'high' ? 'Low Visibility Ahead' :
+               severity === 'medium' ? 'Stay Alert' : 'Route Advisory',
+        message: severity === 'high'
+          ? 'Limited lighting and foot traffic ahead. Stay on the main road and keep emergency features accessible.'
+          : severity === 'medium'
+          ? 'Reduced crowd density on this stretch. Stay aware of your surroundings.'
+          : 'Conditions are moderate. Continue on the recommended route.',
+      };
     }
 
     // ── Cooldown check ───────────────────────────────────────────────────────

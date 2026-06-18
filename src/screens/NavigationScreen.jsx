@@ -354,12 +354,13 @@ export default function NavigationScreen({ navigation }) {
   }, [dotIndex, selectedRoute]);
 
   // ── Gemini Dynamic Safety Alert ─────────────────────────────────────────────
-  // Runs once after navigation phase begins, then re-evaluates whenever the
-  // dot crosses the 25%, 60% and 85% progress thresholds.
-  // The service itself enforces the 60s cooldown and deduplication by fingerprint.
+  // Triggered when the navigation dot crosses progress thresholds AND route
+  // conditions meet the safety criteria (isolation, lighting, crowd, etc.).
+  // Uses wider milestone windows to survive variable step sizes.
+  // The service enforces 60s cooldown + fingerprint deduplication internally.
   // Nothing here modifies route scores, rankings, or any navigation state.
   useEffect(() => {
-    // Only run during active navigation
+    // Only run during active navigation — not during route selection overlay
     if (selectionPhase !== 'navigating') return;
     if (!selectedRoute) return;
     if (geminiInFlight.current) return;
@@ -367,16 +368,18 @@ export default function NavigationScreen({ navigation }) {
     const coords = activeCoordsRef.current;
     if (!coords || coords.length === 0) return;
 
-    // Only trigger at meaningful progress milestones to avoid over-calling
     const progress = dotIndex / Math.max(1, coords.length - 1);
+
+    // Wider milestone windows (5% band) so variable step sizes don't skip them.
+    // 'start' fires once between 0–5% so the very first navigating render triggers.
     const milestone =
-      dotIndex === 0 ? 'start' :
-      (progress >= 0.25 && progress < 0.27) ? 'quarter' :
-      (progress >= 0.60 && progress < 0.62) ? 'mid' :
-      (progress >= 0.85 && progress < 0.87) ? 'near-end' :
+      (progress >= 0.00 && progress < 0.05) ? 'start' :
+      (progress >= 0.25 && progress < 0.30) ? 'quarter' :
+      (progress >= 0.55 && progress < 0.60) ? 'mid' :
+      (progress >= 0.80 && progress < 0.85) ? 'near-end' :
       null;
 
-    if (!milestone && dotIndex !== 0) return; // not a trigger milestone
+    if (!milestone) return; // not a trigger milestone
 
     // Build route context from existing scoring data — no new API calls
     const { confidenceFactors = {}, safetyScore = 50 } = selectedRoute;
@@ -395,10 +398,10 @@ export default function NavigationScreen({ navigation }) {
       nearbyHospitals:    0,
     };
 
-    // Check trigger conditions before even attempting the API call
+    // Check trigger conditions before attempting the API call
     if (!shouldTriggerAlert(routeContext)) return;
 
-    // Build fingerprint to avoid re-showing identical alerts
+    // Fingerprint: deduplication — don't re-show identical conditions
     const fp = [
       routeContext.timeMode,
       routeContext.travelMode,
@@ -409,27 +412,32 @@ export default function NavigationScreen({ navigation }) {
       milestone,
     ].join('|');
 
-    if (fp === lastAlertFingerprint.current) return; // same conditions, already shown
+    if (fp === lastAlertFingerprint.current) return; // already shown for these conditions
 
-    // Fire async — non-blocking, navigation continues
+    // Fire async — non-blocking, map/dot/SOS all continue normally
     geminiInFlight.current = true;
     setGeminiLoading(true);
     setGeminiCardVisible(true);
+    setGeminiAlert(null); // clear any previous alert before loading new one
 
     generateSafetyAlert(routeContext)
-      .then(alert => {
+      .then(newAlert => {
         if (!isMounted.current) return;
-        if (alert) {
-          setGeminiAlert(alert);
+        if (newAlert) {
+          setGeminiAlert(newAlert);
           lastAlertFingerprint.current = fp;
         } else {
-          // No alert returned (cooldown, cache, error) — hide the loading card
+          // Gemini returned null (cooldown/no key/cache) — hide card cleanly
           setGeminiCardVisible(false);
+          setGeminiLoading(false);
         }
       })
       .catch(() => {
-        // Silent fail — never crash navigation
-        if (isMounted.current) setGeminiCardVisible(false);
+        // Silent fail — navigation must never crash
+        if (isMounted.current) {
+          setGeminiCardVisible(false);
+          setGeminiLoading(false);
+        }
       })
       .finally(() => {
         geminiInFlight.current = false;
@@ -973,7 +981,7 @@ export default function NavigationScreen({ navigation }) {
       )}
 
       {/* ── Gemini Dynamic Safety Alert ── */}
-      {(geminiCardVisible || geminiLoading) && (
+      {(geminiCardVisible) && (
         <View style={styles.geminiAlertWrap} pointerEvents="box-none">
           <SafetyAlertCard
             visible={geminiCardVisible}
@@ -1266,12 +1274,16 @@ const styles = StyleSheet.create({
   floatAlertTextCaution: { color: '#92400E' },
 
   // ── Gemini Dynamic Safety Alert wrapper ─────────────────────────────────────
+  // Sits above the route info card + bottom compare strip.
+  // left: 16, right: 100 keeps it clear of the SOS button (64px wide, right: 24).
   geminiAlertWrap: {
     position: 'absolute',
-    bottom: 230,
+    bottom: 220,
     left: 16,
     right: 100,
     zIndex: 20,
+    // Ensure it receives touch events for the dismiss button
+    pointerEvents: 'box-none',
   },
 
   alertBackdrop: {
